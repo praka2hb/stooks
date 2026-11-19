@@ -44,3 +44,11 @@ export function getFeeSplit(settings, stock, session) {
   const redBoost = session === 'open' && settings.red && stock.move <= -settings.redTrigger ? 25 : 0;
   return { launcher: 70 - vaultShare, vault: vaultShare + redBoost, platform: 30 - redBoost };
 }
+
+export const defaultSettings = {
+  floor: true, bell: true, shadow: false, red: false, diamond: false,
+  openFee: 0.8, closeFee: 1.5, vaultShare: 30, sensitivity: 20, redTrigger: 2,
+  payoutDays: 30, snipeFee: 25, snipeMinutes: 5,
+};
+
+export const sessionOptions = [['open', 'Open'], ['closed', 'Closed']];

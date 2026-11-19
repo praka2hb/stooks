@@ -1,9 +1,14 @@
 # StockHooks frontend
 
-The site is in `dist/`. Serve it from this directory with Python 3.
+StockHooks uses the Next.js App Router. Install dependencies and start the development server from this directory.
 
 ```sh
-python3 -m http.server 4173 --bind 127.0.0.1 --directory dist
+npm ci
+npm run dev
 ```
 
-Open [the local site](http://127.0.0.1:4173/). The market feed, coin charts, and quotes use sample data. The launch builder saves demo coins in the current browser using local storage.
+Open [the local app](http://localhost:3000/). Explore `/markets/`, inspect a coin at `/coin/chips/`, or configure a demo launch at `/launch/`.
+
+Run `npm run build` to generate the production export in `out/`. Run `npm run preview` to serve that export locally with Python 3.
+
+The market feed, coin charts, and quotes use sample data. The launch builder saves demo coins in the current browser using local storage.

@@ -1,11 +1,11 @@
 @font-face {
   font-family: Inter;
-  src: url("./assets/Inter-400.woff2") format("woff2");
+  src: url("/assets/Inter-400.woff2") format("woff2");
   font-display: swap;
 }
 @font-face {
   font-family: JetBrains Mono;
-  src: url("./assets/JetBrainsMono-400.woff2") format("woff2");
+  src: url("/assets/JetBrainsMono-400.woff2") format("woff2");
   font-display: swap;
 }
 
@@ -31,7 +31,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; min-width: 320px; }
-body.in-app { background: var(--canvas); }
+.application-shell { background: var(--canvas); }
 a { color: inherit; text-decoration: none; }
 button, input, select { font: inherit; }
 button, select, summary { cursor: pointer; }
@@ -152,7 +152,7 @@ main:focus { outline: none; }
 .feature-metrics { justify-content: space-between; flex-wrap: wrap; font: 400 .82rem/1.4 var(--mono); }
 .feature-metrics small { font-family: var(--sans); }
 .avatar { display: inline-grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border-radius: 7px; background: #dfe6ff; color: #233b89; font: 700 .95rem/1 var(--sans); }
-.avatar-cat, .avatar-rocket, .avatar-goose, .avatar-receipt { background-image: url("./assets/coin-art.jpg"); background-size: 200% 200%; }
+.avatar-cat, .avatar-rocket, .avatar-goose, .avatar-receipt { background-image: url("/assets/coin-art.jpg"); background-size: 200% 200%; }
 .avatar-cat { background-position: left top; }
 .avatar-rocket { background-position: right top; }
 .avatar-goose { background-position: left bottom; }
