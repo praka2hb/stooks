@@ -1,17 +1,23 @@
+import { Anton, Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { LegacyLinks } from '../components/legacy-links';
 
+// Self-hosted at build time by next/font; no requests go to Google from the browser.
+const display = Anton({ weight: '400', subsets: ['latin'], variable: '--font-display' });
+const sans = Geist({ subsets: ['latin'], variable: '--font-sans' });
+const mono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
+
 export const metadata = {
-  title: { default: 'StockHooks — The stock sets the rules.', template: '%s — StockHooks' },
-  description: 'A launchpad for memes paired with tokenized stocks. Explore markets and preview rules before you launch.',
+  title: { default: 'Stooks — The stock sets the rules', template: '%s — Stooks' },
+  description: 'Launch a coin wired to a tokenized stock on Base. Market hours, red days and earnings change its fees, payouts and buybacks automatically.',
   icons: { icon: '/assets/favicon.png' },
 };
 
-export const viewport = { themeColor: '#0b1224' };
+export const viewport = { themeColor: '#f2f2f0' };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
         <LegacyLinks />
         <a className="skip-link" href="#main">Skip to content</a>

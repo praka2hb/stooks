@@ -38,20 +38,23 @@ export function BellFigure() {
   );
 }
 
-export function MarketChart({ coin, range = '24h', expanded = false }) {
+export const UP = '#08875a';
+export const DOWN = '#d4234a';
+
+export function MarketChart({ coin, range = '24h', expanded = false, fill = false }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     const series = makeSeries(coin, range);
     const options = expanded
-      ? { grid: true, fill: true, benchmark: makeSeries(coin, range, true) }
-      : { color: coin.change < 0 ? '#AF3C4E' : '#2452F5' };
+      ? { grid: true, fill: true, color: '#1546e8', benchmark: makeSeries(coin, range, true) }
+      : { color: coin.change < 0 ? DOWN : UP, fill };
     const paint = () => drawSeries(canvas, series, options);
     const resize = new ResizeObserver(paint);
     resize.observe(canvas);
     paint();
     return () => resize.disconnect();
-  }, [coin, range, expanded]);
+  }, [coin, range, expanded, fill]);
 
   return expanded
     ? <canvas ref={canvasRef} id="coin-chart" role="img" aria-label="Illustrative normalized price trend for the meme and its paired stock" />

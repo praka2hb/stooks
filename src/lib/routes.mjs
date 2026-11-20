@@ -6,5 +6,6 @@ export function marketPath(stock) {
 
 export function coinPath(id) {
   const safeId = encodeURIComponent(id);
+  if (id.startsWith('0x')) return `/coin/live/?id=${safeId}`; // on-chain pool id
   return id.startsWith('demo-') ? `/coin/preview/?id=${safeId}` : `/coin/${safeId}/`;
 }

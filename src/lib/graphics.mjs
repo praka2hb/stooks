@@ -74,13 +74,13 @@ export function makeSeries(coin, range = '24h', benchmark = false) {
 export function drawSeries(canvas, series, options = {}) {
   const { context, width, height } = setupCanvas(canvas);
   if (!width || !height) return;
-  const { color = '#2452F5', fill = false, grid = false, benchmark } = options;
+  const { color = '#1546e8', fill = false, grid = false, benchmark } = options;
   const inset = grid ? 14 : 2;
   const plotHeight = height - inset * 2;
   const plotWidth = width - inset * 2;
 
   if (grid) {
-    context.strokeStyle = '#edf0f5';
+    context.strokeStyle = 'rgba(7, 22, 58, .07)';
     for (let row = 0; row <= 4; row++) {
       const y = Math.round(inset + row * plotHeight / 4) + 0.5;
       context.beginPath();
@@ -106,8 +106,8 @@ export function drawSeries(canvas, series, options = {}) {
     context.lineTo(inset, height - inset);
     context.closePath();
     const gradient = context.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, 'rgba(36, 82, 245, .19)');
-    gradient.addColorStop(1, 'rgba(36, 82, 245, 0)');
+    gradient.addColorStop(0, `${color}55`);
+    gradient.addColorStop(1, `${color}00`);
     context.fillStyle = gradient;
     context.fill();
   }
@@ -115,7 +115,7 @@ export function drawSeries(canvas, series, options = {}) {
   if (benchmark) {
     trace(benchmark);
     context.lineWidth = 1.6;
-    context.strokeStyle = '#758197';
+    context.strokeStyle = 'rgba(7, 22, 58, .35)';
     context.setLineDash([6, 4]);
     context.stroke();
     context.setLineDash([]);

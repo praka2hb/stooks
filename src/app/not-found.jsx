@@ -7,7 +7,7 @@ export default function NotFound() {
       <Brand />
       <main id="main" tabIndex={-1}>
         <h1>Market unavailable</h1>
-        <p>Open Markets to see the demo coins and stocks available in StockHooks.</p>
+        <p>Open Markets to see the demo coins and stocks available on Stooks.</p>
         <Link className="button button-primary" href="/markets/">Browse markets</Link>
       </main>
     </div>

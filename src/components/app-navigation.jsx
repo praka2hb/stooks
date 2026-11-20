@@ -8,7 +8,7 @@ export function AppNavigation() {
   return (
     <nav aria-label="App navigation">
       <Link href="/markets/" aria-current={!isLaunch ? 'page' : undefined}>Markets</Link>
-      <Link href="/launch/" aria-current={isLaunch ? 'page' : undefined}>Create</Link>
+      <Link href="/launch/" aria-current={isLaunch ? 'page' : undefined}>Launch</Link>
     </nav>
   );
 }

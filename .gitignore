@@ -1,3 +1,7 @@
 /node_modules/
 /.next/
 /out/
+
+# local env (may hold a test key)
+.env.local
+.env*.local

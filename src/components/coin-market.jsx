@@ -87,7 +87,7 @@ export function CoinMarket({ coin }) {
   const stock = stockById[coin.stock];
   const settings = {
     ...defaultSettings,
-    bell: coin.rules.includes('bell'), shadow: coin.rules.includes('shadow'), floor: coin.rules.includes('floor'), red: coin.rules.includes('red'),
+    bell: coin.rules.includes('bell'), shadow: coin.rules.includes('shadow'), floor: true, red: coin.rules.includes('red'),
     ...coin.settings,
   };
   const hasVault = coin.rules.includes('floor');
@@ -99,7 +99,9 @@ export function CoinMarket({ coin }) {
     floor: `${units.format(coin.vault)} ${stock.id}`,
     red: session === 'open' && stock.move <= -settings.redTrigger ? 'Boost active' : 'Boost inactive',
     shadow: session === 'closed' ? 'Paused after hours' : `${percent(stock.move)} stock move`,
-    snipe: coin.draft ? `${settings.snipeFee}% at launch` : 'Launch window ended',
+    diamond: `${settings.minPayout ?? 50}% → 100% over ${settings.payoutDays ?? 30}d`,
+    pass: `−${settings.passDiscount ?? 50}% for shareholders`,
+    earnings: 'Reacts to the next earnings report',
   };
 
   return (
