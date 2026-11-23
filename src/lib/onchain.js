@@ -2,20 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { encodeAbiParameters, formatUnits, keccak256, parseAbiItem } from 'viem';
-import { abis, config, getWallet, knownStocks, publicClient, subscribeWallet } from './chain';
+import { abis, config, getServerWallet, getWallet, knownStocks, publicClient, subscribeWallet } from './chain';
 import { dexPrice } from './stock-prices';
+import { safeImage } from './coin-image';
 
 const launchedEvent = parseAbiItem(
   'event Launched(bytes32 indexed poolId, address indexed meme, address indexed launcher, address vault, address stock, uint256 startFdvUsd, int24 startTick)'
 );
 const feeEvent = parseAbiItem('event FeeTaken(bytes32 indexed id, bool isBuy, uint256 amount, uint256 feeBps, uint256 vaultShareBps)');
+const swapEvent = parseAbiItem('event Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)');
+const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
 
 const read = (address, abi, functionName, args = []) => publicClient.readContract({ address, abi, functionName, args });
 
 // ---------------------------------------------------------------- hooks
 
 export function useWallet() {
-  return useSyncExternalStore(subscribeWallet, getWallet, getWallet);
+  return useSyncExternalStore(subscribeWallet, getWallet, getServerWallet);
 }
 
 /** Run an async loader, with loading/error state and a `reload`. Polls every `pollMs` if given. */
@@ -101,8 +104,40 @@ function rulesFrom(hookRules, vaultInfo) {
   return list;
 }
 
+// Public RPCs cap eth_getLogs at a block range (publicnode: 50,000), so query from the deploy block in chunks.
+const LOG_CHUNK = 49_999n;
+const LOG_PARALLEL = 4;
+
+// Logs already fetched, per filter, so polling only scans new blocks. The last few blocks are re-read to absorb reorgs.
+const logCache = new Map();
+const REORG_DEPTH = 30n;
+const logKey = l => `${l.transactionHash}:${l.logIndex}`;
+
+async function getLogsSinceDeploy(filter) {
+  const key = JSON.stringify([filter.address, filter.event?.name, filter.args ?? null]);
+  const cached = logCache.get(key);
+  const latest = await publicClient.getBlockNumber();
+  const start = cached ? (cached.to > REORG_DEPTH + config.fromBlock ? cached.to - REORG_DEPTH : config.fromBlock) : config.fromBlock;
+  const ranges = [];
+  for (let from = start; from <= latest; from += LOG_CHUNK + 1n) {
+    const to = from + LOG_CHUNK > latest ? latest : from + LOG_CHUNK;
+    ranges.push([from, to]);
+  }
+  const fresh = [];
+  for (let i = 0; i < ranges.length; i += LOG_PARALLEL) {
+    const batch = await Promise.all(ranges.slice(i, i + LOG_PARALLEL)
+      .map(([fromBlock, toBlock]) => publicClient.getLogs({ ...filter, fromBlock, toBlock })));
+    for (const logs of batch) fresh.push(...logs);
+  }
+  const kept = cached ? cached.logs.filter(l => l.blockNumber < start) : [];
+  const seen = new Set(kept.map(logKey));
+  const out = [...kept, ...fresh.filter(l => !seen.has(logKey(l)))];
+  logCache.set(key, { to: latest, logs: out });
+  return out;
+}
+
 async function feeLogs(poolId) {
-  return publicClient.getLogs({ address: config.hook, event: feeEvent, args: { id: poolId }, fromBlock: config.fromBlock, toBlock: 'latest' });
+  return getLogsSinceDeploy({ address: config.hook, event: feeEvent, args: { id: poolId } });
 }
 
 /** Total traded volume (stock units, gross) and number of trades, from the hook's FeeTaken events. */
@@ -118,11 +153,12 @@ export async function loadCoin(poolId, launchedArgs) {
   const [meme, vault, stockAddr, launcher, launchedAt] = launchedArgs
     ? [launchedArgs.meme, launchedArgs.vault, launchedArgs.stock, launchedArgs.launcher, null]
     : await read(config.factory, abis.factory, 'launches', [poolId]);
-  const [stock, name, symbol, hookRules, key, sqrtP, reserve, circulating, diamond, minPayoutBps, fullAfter, earnings, fullPayoutUntil, vLaunchTime, redeemOpenAfter, logs, fee, block] =
+  const [stock, name, symbol, metadataURI, hookRules, key, sqrtP, reserve, circulating, diamond, minPayoutBps, fullAfter, earnings, fullPayoutUntil, vLaunchTime, redeemOpenAfter, logs, fee, block, usdcRoute] =
     await Promise.all([
       loadStock(stockAddr),
       read(meme, abis.erc20, 'name'),
       read(meme, abis.erc20, 'symbol'),
+      read(meme, abis.erc20, 'metadataURI').catch(() => ''),
       read(config.hook, abis.hook, 'rulesOf', [poolId]),
       read(config.hook, abis.hook, 'keyOf', [poolId]),
       sqrtPriceX96(poolId),
@@ -138,6 +174,7 @@ export async function loadCoin(poolId, launchedArgs) {
       feeLogs(poolId),
       read(config.hook, abis.hook, 'quoteFee', [poolId, '0x0000000000000000000000000000000000000000']),
       publicClient.getBlock(),
+      config.zap ? read(config.zap, abis.zap, 'route', [stockAddr]).catch(() => ZERO) : ZERO,
     ]);
   const chainNow = Number(block.timestamp); // use chain time, not the browser clock
 
@@ -153,7 +190,7 @@ export async function loadCoin(poolId, launchedArgs) {
     id: poolId,
     live: true,
     meme, vaultAddr: vault, launcher, key,
-    name, symbol, art: '',
+    name, symbol, art: '', image: safeImage(metadataURI),
     stock: stock.id,
     stockInfo: stock,
     hookRules,
@@ -177,11 +214,13 @@ export async function loadCoin(poolId, launchedArgs) {
     chainNow,
     age: Math.max(0, Math.floor((chainNow - launchTime) / 60)),
     change: 0,
+    // USDC trading through the zap, when it has a route for this coin's stock
+    usdcTrading: Boolean(config.zap) && usdcRoute !== ZERO,
   };
 }
 
 export async function loadCoins() {
-  const logs = await publicClient.getLogs({ address: config.factory, event: launchedEvent, fromBlock: config.fromBlock, toBlock: 'latest' });
+  const logs = await getLogsSinceDeploy({ address: config.factory, event: launchedEvent });
   const coins = await Promise.all(logs.map(l => loadCoin(l.args.poolId, l.args).catch(() => null)));
   return coins.filter(Boolean);
 }
@@ -189,11 +228,82 @@ export async function loadCoins() {
 /** Wallet-specific numbers for a coin. */
 export async function loadPosition(coin, address) {
   if (!address) return null;
-  const [memeBal, stockBal, payoutBps] = await Promise.all([
+  const [memeBal, stockBal, payoutBps, usdcBal] = await Promise.all([
     read(coin.meme, abis.erc20, 'balanceOf', [address]),
     read(coin.stockInfo.address, abis.erc20, 'balanceOf', [address]),
     read(coin.vaultAddr, abis.vault, 'payoutBps', [address]),
+    coin.usdcTrading ? read(config.usdc, abis.erc20, 'balanceOf', [address]) : 0n,
   ]);
   const [feeBps] = await read(config.hook, abis.hook, 'quoteFee', [coin.id, address]);
-  return { memeBal, stockBal, payoutBps: Number(payoutBps), feeBps: Number(feeBps) };
+  return { memeBal, stockBal, usdcBal, payoutBps: Number(payoutBps), feeBps: Number(feeBps) };
+}
+
+// ---------------------------------------------------------------- activity
+
+const BASE_BLOCK_SECONDS = 2; // Base produces a block every 2s, so block numbers convert to time without fetching blocks
+const TRADER_LOOKUPS = 50;    // only the newest trades get their sender resolved (one RPC call each)
+const ZERO = '0x0000000000000000000000000000000000000000';
+const abs = v => (v < 0n ? -v : v);
+
+/**
+ * Trades, holders and per-trade prices for one coin, read from Uniswap v4 Swap events,
+ * the hook's FeeTaken events (which say buy or sell) and the token's Transfer events.
+ */
+export async function loadActivity(coin) {
+  const stock = coin.stockInfo;
+  const stockIs0 = coin.hookRules.stockIs0;
+  const [swaps, fees, transfers, head] = await Promise.all([
+    getLogsSinceDeploy({ address: config.poolManager, event: swapEvent, args: { id: coin.id } }),
+    feeLogs(coin.id),
+    getLogsSinceDeploy({ address: coin.meme, event: transferEvent }),
+    publicClient.getBlock(),
+  ]);
+  const headBlock = head.number;
+  const headTime = Number(head.timestamp);
+  const timeOf = block => headTime - Number(headBlock - block) * BASE_BLOCK_SECONDS;
+  const sideByTx = new Map(fees.map(f => [f.transactionHash, f.args.isBuy]));
+
+  const trades = swaps
+    .map(({ args, blockNumber, transactionHash, logIndex }) => {
+      const memeDelta = stockIs0 ? args.amount1 : args.amount0;
+      const stockDelta = stockIs0 ? args.amount0 : args.amount1;
+      // v4 deltas are from the swapper's side: a positive meme delta means the swapper received meme.
+      const isBuy = sideByTx.get(transactionHash) ?? memeDelta > 0n;
+      return {
+        key: `${transactionHash}:${logIndex}`,
+        tx: transactionHash,
+        isBuy,
+        meme: Number(formatUnits(abs(memeDelta), 18)),
+        stock: Number(formatUnits(abs(stockDelta), stock.decimals)),
+        priceStock: memePriceInStock(args.sqrtPriceX96, stockIs0, stock.decimals),
+        time: timeOf(blockNumber),
+        trader: null,
+      };
+    })
+    .sort((a, b) => a.time - b.time);
+
+  const recent = trades.slice(-TRADER_LOOKUPS);
+  const senders = await Promise.all(recent.map(t => traderOf(t.tx)));
+  recent.forEach((t, i) => { t.trader = senders[i]; });
+
+  const balances = new Map();
+  const add = (who, v) => balances.set(who, (balances.get(who) ?? 0n) + v);
+  for (const { args } of transfers) {
+    if (args.from !== ZERO) add(args.from.toLowerCase(), -args.value);
+    if (args.to !== ZERO) add(args.to.toLowerCase(), args.value);
+  }
+  const holders = [...balances]
+    .filter(([, v]) => v > 0n)
+    .map(([address, v]) => ({ address, balance: Number(formatUnits(v, 18)) }))
+    .sort((a, b) => b.balance - a.balance);
+
+  return { trades, holders, now: headTime };
+}
+
+const traderCache = new Map();
+async function traderOf(hash) {
+  if (!traderCache.has(hash)) {
+    traderCache.set(hash, publicClient.getTransaction({ hash }).then(t => t.from, () => { traderCache.delete(hash); return null; }));
+  }
+  return traderCache.get(hash);
 }

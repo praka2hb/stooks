@@ -1,10 +1,10 @@
-import { Anton, Geist, Geist_Mono } from 'next/font/google';
+import { Geist_Mono, Nunito } from 'next/font/google';
 import './globals.css';
 import { LegacyLinks } from '../components/legacy-links';
 
 // Self-hosted at build time by next/font; no requests go to Google from the browser.
-const display = Anton({ weight: '400', subsets: ['latin'], variable: '--font-display' });
-const sans = Geist({ subsets: ['latin'], variable: '--font-sans' });
+// Same stack as Pons: SF Pro Rounded on Apple devices, Nunito (variable weight) everywhere else.
+const sans = Nunito({ subsets: ['latin'], variable: '--font-sans' });
 const mono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
 
 export const metadata = {
@@ -17,7 +17,7 @@ export const viewport = { themeColor: '#f2f2f0' };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <LegacyLinks />
         <a className="skip-link" href="#main">Skip to content</a>

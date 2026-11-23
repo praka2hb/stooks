@@ -9,6 +9,7 @@ import { compactDollars, originalCoins, rules, stockById, units } from '../lib/m
 import { coinPath } from '../lib/routes.mjs';
 import { MarketChart } from './market-graphics';
 import { Avatar, Delta, StockAvatar } from './market-ui';
+import { safeImage } from '../lib/coin-image';
 
 const tabs = [
   ['cap', 'Market cap'],
@@ -44,6 +45,8 @@ function Spark({ coin, fill = false }) {
 
 /** Big square art for trending cards: the coin's picture, or its ticker on the paired stock's colour. */
 function CoinArt({ coin }) {
+  const image = safeImage(coin.image);
+  if (image) return <img className="coin-art coin-art-image" src={image} alt="" />;
   if (['cat', 'rocket', 'goose', 'receipt'].includes(coin.art)) return <span className={`coin-art avatar-${coin.art}`} />;
   return <span className="coin-art coin-art-initial" style={{ '--stock-color': stockOf(coin).color }}>{coin.symbol.slice(0, 4)}</span>;
 }
@@ -57,8 +60,8 @@ function Trending({ coins }) {
       <div className="trending-head">
         <h2 id="trending-title">Trending</h2>
         <div className="rail-arrows">
-          <button type="button" aria-label="Scroll trending left" onClick={() => scroll(-1)}>←</button>
-          <button type="button" aria-label="Scroll trending right" onClick={() => scroll(1)}>→</button>
+          <button type="button" aria-label="Scroll trending left" onClick={() => scroll(-1)}><Chevron dir={-1} /></button>
+          <button type="button" aria-label="Scroll trending right" onClick={() => scroll(1)}><Chevron dir={1} /></button>
         </div>
       </div>
       <div className="trending-rail" ref={rail}>
@@ -67,7 +70,6 @@ function Trending({ coins }) {
             <CoinArt coin={coin} />
             <span className="trend-name"><b>{i + 1}</b>{coin.name}</span>
             <span className="trend-cap"><strong>{compactDollars.format(coin.cap)}</strong><Delta value={coin.change} /></span>
-            <span className="trend-pair"><StockAvatar stock={stockOf(coin)} />{coin.stock}</span>
           </Link>
         ))}
       </div>
@@ -191,4 +193,8 @@ function ListIcon() {
 
 function GridIcon() {
   return <svg viewBox="0 0 16 16" aria-hidden="true">{[[2, 2], [9, 2], [2, 9], [9, 9]].map(([x, y]) => <rect key={`${x}${y}`} x={x} y={y} width="5" height="5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />)}</svg>;
+}
+
+function Chevron({ dir }) {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d={dir < 0 ? 'M10 3 5 8l5 5' : 'M6 3l5 5-5 5'} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }

@@ -69,15 +69,15 @@ function TradePreview({ coin, stock, fee, floor, price, hasVault }) {
       <label className="form-field" htmlFor="trade-amount">You pay</label>
       <div className="field-unit"><input type="number" id="trade-amount" min="0" step="any" value={input} inputMode="decimal" onChange={event => setInput(event.target.value)} /><span>{isBuying ? stock.id : coin.symbol}</span></div>
       <div className="quote-summary" aria-live="polite">
-        <span>Estimated output</span><strong>{units.format(output)} {isBuying ? coin.symbol : stock.id}</strong>
+        <span>Estimated output</span><strong>{mode !== 'redeem' && !stock.price ? '—' : `${units.format(output)} ${isBuying ? coin.symbol : stock.id}`}</strong>
         <small>{mode === 'redeem' ? `${coin.payout}% of vault floor · Burns the meme` : `${fee.toFixed(2)}% example swap fee`}</small>
       </div>
       {hasVault && !isBuying && (
         <div className="quote-comparison">
-          <div><span>Sell</span><strong>{units.format(sold)} {stock.id}</strong></div><div><span>Redeem</span><strong>{units.format(redeemed)} {stock.id}</strong></div>
+          <div><span>Sell</span><strong>{stock.price ? `${units.format(sold)} ${stock.id}` : '—'}</strong></div><div><span>Redeem</span><strong>{units.format(redeemed)} {stock.id}</strong></div>
         </div>
       )}
-      <p className="preview-note trade-note">Example quotes using sample prices. Price impact and network fees are excluded.</p>
+      <p className="preview-note trade-note">{!stock.price && `No sample price for ${stock.id} in the demo. `}Example quotes using sample prices. Price impact and network fees are excluded.</p>
     </section>
   );
 }

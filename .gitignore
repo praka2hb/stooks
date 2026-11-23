@@ -5,3 +5,5 @@
 # local env (may hold a test key)
 .env.local
 .env*.local
+
+.DS_Store

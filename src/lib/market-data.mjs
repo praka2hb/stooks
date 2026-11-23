@@ -1,3 +1,5 @@
+import stockList from './stock-list.json';
+
 export const stocks = [
   { id: 'NVDAc', name: 'NVIDIA', price: 185.42, move: 2.84, color: '#dcecbe' },
   { id: 'TSLAc', name: 'Tesla', price: 418.24, move: -2.15, color: '#f9dbda' },
@@ -31,7 +33,16 @@ export const rules = {
 export const optionalRules = ['diamond', 'shadow', 'bell', 'red', 'pass', 'earnings'];
 export const MAX_RULES = 4;
 
-export const stockById = Object.fromEntries(stocks.map(stock => [stock.id, stock]));
+/**
+ * Every tokenized stock on Base (from scripts/sync-stocks.mjs): the sample stocks first with their example prices,
+ * then the rest. Demo mode has no price for the others, so their price is 0 and quotes show a dash.
+ */
+const sampleById = Object.fromEntries(stocks.map(stock => [stock.id, stock]));
+export const allStocks = [
+  ...stocks.map(s => ({ ...stockList.find(l => l.id === s.id), ...s })),
+  ...stockList.filter(l => !sampleById[l.id]).map(l => ({ ...l, price: 0, move: 0, color: '#e2e5e9' })),
+];
+export const stockById = Object.fromEntries(allStocks.map(stock => [stock.id, stock]));
 export const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 export const compactDollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 });
 export const units = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });

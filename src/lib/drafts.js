@@ -1,7 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import { stocks, rules } from './market-data.mjs';
+import { rules, stockById } from './market-data.mjs';
 
 const key = 'stockhooks-preview-v1';
 const eventName = 'stockhooks-drafts-changed';
@@ -18,7 +18,7 @@ function readDrafts() {
     lastDrafts = Array.isArray(parsed) ? parsed.filter(coin =>
       coin && typeof coin.id === 'string' && coin.id.startsWith('demo-') &&
       typeof coin.name === 'string' && typeof coin.symbol === 'string' &&
-      stocks.some(stock => stock.id === coin.stock) &&
+      Object.hasOwn(stockById, coin.stock) &&
       Array.isArray(coin.rules) && coin.rules.every(rule => Object.hasOwn(rules, rule)) &&
       ['cap', 'volume', 'change', 'vault', 'age', 'payout'].every(field => Number.isFinite(coin[field])) &&
       coin.cap > 0

@@ -16,6 +16,9 @@ export const config = {
   factory: process.env.NEXT_PUBLIC_FACTORY || '',
   hook: process.env.NEXT_PUBLIC_HOOK || '',
   router: process.env.NEXT_PUBLIC_ROUTER || '',
+  // Buy/sell with USDC in one transaction (StockHooksZap). Empty = trade in the paired stock only.
+  zap: process.env.NEXT_PUBLIC_ZAP || '',
+  usdc: process.env.NEXT_PUBLIC_USDC || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   oracle: process.env.NEXT_PUBLIC_ORACLE || '',
   clock: process.env.NEXT_PUBLIC_CLOCK || '',
   earnings: process.env.NEXT_PUBLIC_EARNINGS || '',
@@ -34,7 +37,11 @@ export const chain = {
   rpcUrls: { default: { http: [config.rpcUrl || base.rpcUrls.default.http[0]] } },
 };
 
-export const publicClient = isLive ? createPublicClient({ chain, transport: http(config.rpcUrl) }) : null;
+// Reads are bundled: contract reads go through Multicall3 and the rest as JSON-RPC batches, so a page makes a
+// handful of requests instead of dozens (free public RPCs rate-limit bursts).
+export const publicClient = isLive
+  ? createPublicClient({ chain, batch: { multicall: { wait: 16 } }, transport: http(config.rpcUrl, { batch: { wait: 16 }, retryCount: 4 }) })
+  : null;
 
 const STOCK_COLORS = { NVDAc: '#dcecbe', TSLAc: '#f9dbda', AAPLc: '#e2e5e9', MSFTc: '#e4eee4', GOOGLc: '#e1ebfb', AMZNc: '#fbe8cf', METAc: '#dbe6fb', MSTRc: '#fde3cc', SPCXc: '#dfe7ff', SNDKc: '#f6dcdc', CRCLc: '#dcebf5', INTCc: '#d9e9f7', ANTc: '#f3e3d3' };
 /** Soft pastel from the ticker, so every stock gets a stable color. */
@@ -75,6 +82,14 @@ export const abis = {
     'struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }',
     'function swapExactIn(PoolKey key, bool zeroForOne, uint256 amountIn, uint256 minOut, address recipient, uint256 deadline) returns (uint256 amountOut)',
   ]),
+  zap: parseAbi([
+    'struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }',
+    'function route(address stock) view returns (address)',
+    'function buy(PoolKey key, uint256 usdcIn, uint256 minOut, address recipient, uint256 deadline) returns (uint256)',
+    'function sell(PoolKey key, uint256 coinIn, uint256 minOut, address recipient, uint256 deadline) returns (uint256)',
+    'function quoteBuy(PoolKey key, uint256 usdcIn, address trader) returns (uint256)',
+    'function quoteSell(PoolKey key, uint256 coinIn, address trader) returns (uint256)',
+  ]),
   vault: parseAbi([
     'function reserve() view returns (uint256)',
     'function circulating() view returns (uint256)',
@@ -98,6 +113,7 @@ export const abis = {
     'function balanceOf(address) view returns (uint256)',
     'function allowance(address, address) view returns (uint256)',
     'function approve(address, uint256) returns (bool)',
+    'function metadataURI() view returns (string)', // MemeToken only: the coin's picture as a data: URI
   ]),
   oracle: parseAbi([
     'function price(address stock) view returns (uint256 px, bool ok)',
@@ -113,10 +129,16 @@ export const abis = {
 };
 
 // ---------------------------------------------------------------- wallet
+//
+// Wallets are found with EIP-6963: every installed wallet announces itself, so the user picks one and no extension
+// can hijack the connection by owning window.ethereum (Phantom does this). window.ethereum is only a fallback for
+// wallets too old to announce.
 
-let wallet = { address: null, client: null };
+const REMEMBER = 'stooks-wallet';
+const empty = { address: null, client: null, info: null, provider: null, wallets: [], picker: false, error: '' };
+let wallet = empty;
 const listeners = new Set();
-const emit = () => listeners.forEach(fn => fn());
+const set = patch => { wallet = { ...wallet, ...patch }; listeners.forEach(fn => fn()); };
 
 export function subscribeWallet(fn) {
   listeners.add(fn);
@@ -124,32 +146,124 @@ export function subscribeWallet(fn) {
 }
 
 export const getWallet = () => wallet;
+export const getServerWallet = () => empty;
 
-export async function connectWallet() {
+const found = new Map(); // rdns -> { info: { name, icon, rdns, uuid }, provider }
+
+function addWallet(detail) {
+  if (!detail?.info?.rdns || !detail.provider || found.has(detail.info.rdns)) return;
+  found.set(detail.info.rdns, detail);
+  set({ wallets: [...found.values()] });
+}
+
+let discovering = false;
+/** Start listening for wallets (idempotent). Also tries a silent reconnect to the wallet used last time. */
+export function discoverWallets() {
+  if (discovering || typeof window === 'undefined' || !isLive) return;
+  discovering = true;
+  window.addEventListener('eip6963:announceProvider', e => addWallet(e.detail));
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
+  // Old wallets that don't announce: offer window.ethereum once announcements have had a moment to arrive.
+  setTimeout(() => {
+    if (!found.size && window.ethereum) addWallet({ info: { name: 'Browser wallet', icon: '', rdns: 'injected', uuid: 'injected' }, provider: window.ethereum });
+    reconnect();
+  }, 300);
+}
+
+function remembered() {
+  try { return window.localStorage.getItem(REMEMBER); } catch { return null; }
+}
+function remember(rdns) {
+  try { rdns ? window.localStorage.setItem(REMEMBER, rdns) : window.localStorage.removeItem(REMEMBER); } catch { /* private mode */ }
+}
+
+/** Reconnect without a popup if the wallet used last time still has this site authorised. */
+async function reconnect() {
+  const detail = found.get(remembered() ?? '');
+  if (!detail || wallet.address) return;
+  try {
+    const [address] = await detail.provider.request({ method: 'eth_accounts' });
+    if (address) attach(detail, address);
+  } catch { /* wallet locked or gone: stay disconnected */ }
+}
+
+let detach = () => {};
+function attach(detail, address) {
+  detach();
+  const { provider } = detail;
+  const onAccounts = accounts => (accounts?.length ? attach(detail, accounts[0]) : disconnectWallet());
+  provider.on?.('accountsChanged', onAccounts);
+  detach = () => provider.removeListener?.('accountsChanged', onAccounts);
+  remember(detail.info.rdns);
+  set({
+    address, info: detail.info, provider, picker: false, error: '',
+    client: createWalletClient({ account: address, chain, transport: custom(provider) }),
+  });
+}
+
+export const openWalletPicker = () => { discoverWallets(); set({ picker: true, error: '' }); };
+export const closeWalletPicker = () => set({ picker: false, error: '' });
+
+export function disconnectWallet() {
+  detach();
+  detach = () => {};
+  remember(null);
+  set({ address: null, client: null, info: null, provider: null });
+}
+
+/** Make sure the wallet is on Base, adding the network to it if it has never seen it. */
+async function ensureChain(provider) {
+  const want = `0x${chain.id.toString(16)}`;
+  if ((await provider.request({ method: 'eth_chainId' })) === want) return;
+  try {
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: want }] });
+  } catch (e) {
+    if (e?.code !== 4902 && e?.data?.originalError?.code !== 4902) throw new Error(`Switch your wallet to ${chain.name} to continue.`);
+    await provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [{ chainId: want, chainName: chain.name, nativeCurrency: chain.nativeCurrency, rpcUrls: [config.rpcUrl], blockExplorerUrls: [chain.blockExplorers?.default.url].filter(Boolean) }],
+    });
+  }
+}
+
+/**
+ * Connect a wallet. With `detail` (from the picker) it connects that wallet; without, it reuses the connected one
+ * or opens the picker and throws, so a write started while disconnected asks the user to pick first.
+ */
+export async function connectWallet(detail) {
   if (!isLive) throw new Error('No deployment configured.');
   if (usesDevKey) {
     const account = privateKeyToAccount(config.devKey);
-    wallet = { address: account.address, client: createWalletClient({ account, chain, transport: http(config.rpcUrl) }) };
-    emit();
+    set({ address: account.address, info: { name: 'Test wallet' }, client: createWalletClient({ account, chain, transport: http(config.rpcUrl) }) });
     return wallet;
   }
-  if (typeof window === 'undefined' || !window.ethereum) throw new Error('No browser wallet found. Install a wallet such as Coinbase Wallet or MetaMask.');
-  const client = createWalletClient({ chain, transport: custom(window.ethereum) });
-  const [address] = await client.requestAddresses();
-  try {
-    await client.switchChain({ id: chain.id });
-  } catch {
-    // Wallet may not know the chain; it will reject the transaction instead, with a clear message.
+  if (!detail) {
+    if (wallet.client) return wallet;
+    openWalletPicker();
+    throw new Error('Connect a wallet to continue.');
   }
-  wallet = { address, client: createWalletClient({ account: address, chain, transport: custom(window.ethereum) }) };
-  emit();
-  return wallet;
+  try {
+    const [address] = await detail.provider.request({ method: 'eth_requestAccounts' });
+    if (!address) throw new Error('The wallet returned no account.');
+    await ensureChain(detail.provider);
+    attach(detail, address);
+    return wallet;
+  } catch (e) {
+    const message = e?.code === 4001 ? 'Request rejected in the wallet.' : e?.shortMessage || e?.message || 'Could not connect.';
+    set({ error: message });
+    throw new Error(message);
+  }
 }
 
 /** Send a contract write and wait for it to be mined. Returns the receipt. */
 export async function write(request) {
-  const { client } = wallet.client ? wallet : await connectWallet();
-  const hash = await client.writeContract({ chain, ...request });
+  const { client, provider } = wallet.client ? wallet : await connectWallet();
+  if (provider) await ensureChain(provider); // the user may have switched networks since connecting
+  // Wallet gas estimates run too tight for swaps through the hook (nested token calls hit the 63/64 gas rule
+  // and the whole trade reverts out of gas), so estimate here and add a 50% margin. Unused gas is not charged.
+  const account = client.account?.address || (await client.getAddresses())[0];
+  const estimate = await publicClient.estimateContractGas({ ...request, account });
+  const hash = await client.writeContract({ chain, ...request, gas: (estimate * 3n) / 2n });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== 'success') throw new Error('Transaction reverted.');
   return receipt;

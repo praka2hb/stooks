@@ -4,19 +4,42 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { decodeEventLog, parseUnits } from 'viem';
-import { abis, config, isLive, knownStocks, publicClient, write } from '../lib/chain';
+import { abis, config, ensureAllowance, isLive, knownStocks, publicClient, write } from '../lib/chain';
+import { loadStock } from '../lib/onchain';
+import { compressImage } from '../lib/coin-image';
 import { saveDraft } from '../lib/drafts';
 import { dexPrice } from '../lib/stock-prices';
-import { MAX_RULES, defaultSettings, dollars, getFee, getFeeSplit, optionalRules, rules, sessionOptions, stocks, stockById } from '../lib/market-data.mjs';
+import { MAX_RULES, defaultSettings, dollars, getFee, getFeeSplit, optionalRules, rules, sessionOptions, allStocks, stockById } from '../lib/market-data.mjs';
 import { coinPath } from '../lib/routes.mjs';
 import { RuleIcon, Segmented, StockAvatar } from './market-ui';
 
 // Live: every Coinbase stock the factory allowlists (feed stocks first, then by tokens in circulation).
 const liveStocks = Object.values(knownStocks).map(s => ({ ...s, price: 0, move: 0 }));
-const stockChoices = isLive ? liveStocks : stocks;
+const stockChoices = isLive ? liveStocks : allStocks;
 const SHOWN = 12;
 // Rules that read an on-chain price: only stocks with a Chainlink feed can use them.
 const FEED_RULES = ['shadow', 'red', 'earnings'];
+
+// Dev buy, mirrored from StockHooksFactory: the first curve band holds 10% of supply between the opening FDV and
+// 1.0001^16000 times it, the launcher may buy at most 5% of supply, and the buy pays the normal 1.5% fee.
+const BAND1_TOP = Math.exp(16000 * Math.log(1.0001));
+const DEV_FEE = 0.015;
+const MAX_DEV_SHARE = 0.05;
+/** Share of supply (0-1) a dev buy of `usd` gets at opening FDV `cap`. */
+function devBuyShare(usd, cap) {
+  if (!(usd > 0) || !(cap > 0)) return 0;
+  const sa = Math.sqrt(cap), sb = Math.sqrt(cap * BAND1_TOP);
+  const L = 0.1 / (1 / sa - 1 / sb);
+  const sp = sa + (usd * (1 - DEV_FEE)) / L;
+  return L * (1 / sa - 1 / sp);
+}
+/** Largest dev buy in USD, kept just under the contract's 5% so rounding never trips DevBuyTooLarge. */
+function maxDevBuyUsd(cap) {
+  const sa = Math.sqrt(cap), sb = Math.sqrt(cap * BAND1_TOP);
+  const L = 0.1 / (1 / sa - 1 / sb);
+  const sp = 1 / (1 / sa - (MAX_DEV_SHARE * 0.98) / L);
+  return Math.floor((L * (sp - sa)) / (1 - DEV_FEE));
+}
 
 function searchStocks(query, selected) {
   const q = query.trim().toLowerCase();
@@ -56,7 +79,8 @@ function RuleParameters({ id, settings, update, disabled }) {
   );
 }
 
-function LaunchPreview({ name, symbol, stock, cap, session, setSession, settings, feedback, busy, count }) {
+function LaunchPreview({ name, symbol, image, stock, cap, devBuy, session, setSession, settings, feedback, busy, count }) {
+  const devShare = devBuyShare(Number(devBuy), Number(cap));
   const feeSplit = getFeeSplit(settings, stock, session);
   const split = [
     { label: 'Coin’s share vault', value: feeSplit.vault, color: 'blue' },
@@ -67,10 +91,11 @@ function LaunchPreview({ name, symbol, stock, cap, session, setSession, settings
       <section className="preview-panel" aria-labelledby="preview-title">
         <div className="preview-panel-header"><span className="experience-dot" /><h2 id="preview-title">Launch preview</h2></div>
         <div className="preview-coin">
-          <div className="preview-avatar">{symbol.slice(0, 2) || name.slice(0, 1).toUpperCase() || '?'}</div>
+          {image ? <img className="preview-avatar" src={image} alt="" /> : <div className="preview-avatar">{symbol.slice(0, 2) || name.slice(0, 1).toUpperCase() || '?'}</div>}
           <div><strong>{symbol || name || 'Your coin'}</strong><span>Paired with {stock.id}</span></div>
         </div>
         <div className="preview-line"><span>Opening FDV</span><strong>{cap ? dollars.format(Number(cap)) : '—'}</strong></div>
+        <div className="preview-line"><span>Dev buy</span><strong>{devShare ? `${dollars.format(Number(devBuy))} · ${(devShare * 100).toFixed(2)}% of supply` : 'None'}</strong></div>
         <div className="preview-line"><span>Rules picked</span><strong>{count} of {MAX_RULES}</strong></div>
         <div className="preview-session">
           <span>Market session</span><Segmented label="Market session" options={sessionOptions} value={session} onChange={setSession} />
@@ -87,7 +112,7 @@ function LaunchPreview({ name, symbol, stock, cap, session, setSession, settings
           </dl>
         </section>
         <button className="button button-primary full-button" type="submit" disabled={busy}>{busy ? 'Launching…' : isLive ? 'Launch on Base' : 'Save demo launch'}</button>
-        <p className="preview-note">{isLive ? 'One transaction. Supply goes into a Uniswap v4 pool, locked forever. Rules lock on-chain.' : 'Demo mode: saves in this browser. No wallet needed.'}</p>
+        <p className="preview-note">{isLive ? 'One transaction. Supply goes into a Uniswap v4 pool, locked forever. Rules lock on-chain. Buys in the first 5 minutes pay a sniper fee, from 25% down to normal, and it all goes to the vault.' : 'Demo mode: saves in this browser. No wallet needed.'}</p>
         <p id="launch-feedback" role="status">{feedback}</p>
       </section>
     </aside>
@@ -114,6 +139,23 @@ export function LaunchBuilder() {
   const [name, setName] = useState('');
   const [symbol, setSymbol] = useState('');
   const [cap, setCap] = useState('10000');
+  const [devBuy, setDevBuy] = useState('');
+  const [image, setImage] = useState('');
+  const [imageNote, setImageNote] = useState('');
+
+  async function pickImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImageNote('Shrinking…');
+    try {
+      const uri = await compressImage(file);
+      setImage(uri);
+      setImageNote(`${(uri.length / 1024).toFixed(1)} KB, stored on-chain with the coin.`);
+    } catch (e) {
+      setImageNote(e.message);
+    }
+  }
   const [settings, setSettings] = useState(defaultSettings);
   const [session, setSession] = useState('open');
   const [feedback, setFeedback] = useState('');
@@ -160,12 +202,15 @@ export function LaunchBuilder() {
       return;
     }
     if (settings.earnings && !settings.diamond) return setFeedback('Earnings Bomb needs Diamond Redeem.');
+    const devUsd = Number(devBuy) || 0;
+    if (devUsd < 0) return setFeedback('Dev buy can’t be negative.');
+    if (devUsd > maxDevBuyUsd(Number(cap))) return setFeedback(`Dev buy is capped at 5% of supply, about ${dollars.format(maxDevBuyUsd(Number(cap)))} at this FDV.`);
     if (needsFeed && FEED_RULES.some(k => settings[k])) return setFeedback(`${stock.id} has no price feed, so Shadow Peg, Red Day Boost and Earnings Bomb are off.`);
 
     if (!isLive) {
       const coin = {
         id: `demo-${crypto.randomUUID()}`, name: name.trim(), symbol: symbol.toUpperCase(), stock: stock.id,
-        art: '', age: 0, cap: Number(cap), volume: 0, change: 0, vault: 0,
+        art: '', image, age: 0, cap: Number(cap), volume: 0, change: 0, vault: 0,
         payout: settings.diamond ? settings.minPayout : 100,
         rules: ['floor', ...picked], settings, draft: true,
       };
@@ -184,11 +229,22 @@ export function LaunchBuilder() {
         if (!q) throw new Error(`No market price for ${stock.id} yet. It needs a USDC pool on Base with at least $1K of liquidity.`);
         startFdvStock = parseUnits((Number(cap) / q.price).toFixed(decimals), decimals);
       }
+      // Dev buy: priced from the same source the launch uses (Chainlink, else the DEX pool), sent in stock units.
+      // It runs inside the launch transaction before anyone else can trade, so no slippage limit is needed.
+      let devBuyStock = 0n;
+      if (devUsd > 0) {
+        const px = needsFeed ? (await dexPrice(stock.address))?.price : (await loadStock(stock.address)).price;
+        if (!px) throw new Error(`No price for ${stock.id}, so the dev buy can’t be sized.`);
+        devBuyStock = parseUnits((devUsd / px).toFixed(decimals), decimals);
+        setFeedback(`Approve ${stock.id} for the dev buy in your wallet…`);
+        await ensureAllowance(stock.address, config.factory, devBuyStock);
+        setFeedback('Confirm the launch in your wallet…');
+      }
       const receipt = await write({
         address: config.factory, abi: abis.factory, functionName: 'launch',
         args: [{
-          name: name.trim(), symbol: symbol.toUpperCase(), metadataURI: '', stock: stock.address,
-          startFdvUsd: parseUnits(String(cap), 18), startFdvStock, rules: toRuleParams(settings, decimals), devBuyStock: 0n, minDevBuyOut: 0n,
+          name: name.trim(), symbol: symbol.toUpperCase(), metadataURI: image, stock: stock.address,
+          startFdvUsd: parseUnits(String(cap), 18), startFdvStock, rules: toRuleParams(settings, decimals), devBuyStock, minDevBuyOut: 0n,
         }],
       });
       const launched = receipt.logs
@@ -243,8 +299,21 @@ export function LaunchBuilder() {
               <label>Coin name<input name="name" maxLength={36} required placeholder="Silicon Alley" value={name} onChange={event => { setName(event.target.value); setFeedback(''); }} /></label>
               <label>Ticker<input name="symbol" maxLength={10} required pattern="[A-Za-z0-9]{2,10}" title="Use 2 to 10 letters or numbers" placeholder="CHIPS" value={symbol} onChange={event => setSymbol(event.target.value)} /></label>
             </div>
+            <div className="form-field image-field">
+              <span>Picture <small className="field-hint">Optional. Square works best. It’s shrunk to a few KB and stored on-chain, so it can never go missing.</small></span>
+              <div className="image-picker">
+                {image ? <img src={image} alt="Coin picture preview" /> : <span className="image-empty" aria-hidden="true">+</span>}
+                <label className="button button-outline">{image ? 'Change' : 'Choose picture'}<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={pickImage} /></label>
+                {image && <button type="button" className="image-remove" onClick={() => { setImage(''); setImageNote(''); }}>Remove</button>}
+              </div>
+              {imageNote && <small className="field-hint" role="status">{imageNote}</small>}
+            </div>
             <label className="form-field">
               Opening FDV <span className="field-unit"><input name="cap" type="number" min="5000" max="50000" step="100" value={cap} required onChange={event => setCap(event.target.value)} /><span>USD</span></span>
+            </label>
+            <label className="form-field">
+              Dev buy <small className="field-hint">Optional. Buy first, in the launch transaction, paid in {stock.id}. Up to 5% of supply, about {dollars.format(maxDevBuyUsd(Number(cap) || 10000))}. No sniper fee.</small>
+              <span className="field-unit"><input name="devBuy" type="number" min="0" max={maxDevBuyUsd(Number(cap) || 10000)} step="any" placeholder="0" value={devBuy} onChange={event => { setDevBuy(event.target.value); setFeedback(''); }} /><span>USD</span></span>
             </label>
           </fieldset>
           <fieldset className="form-panel rules-form">
@@ -266,7 +335,7 @@ export function LaunchBuilder() {
             ))}
           </fieldset>
         </div>
-        <LaunchPreview name={name.trim()} symbol={symbol.toUpperCase()} stock={stock} cap={cap} session={session} setSession={setSession} settings={settings} feedback={feedback} busy={busy} count={picked.length} />
+        <LaunchPreview name={name.trim()} symbol={symbol.toUpperCase()} image={image} stock={stock} cap={cap} devBuy={devBuy} session={session} setSession={setSession} settings={settings} feedback={feedback} busy={busy} count={picked.length} />
       </form>
     </>
   );

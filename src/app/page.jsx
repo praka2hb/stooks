@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { Avatar, Brand, Delta } from '../components/market-ui';
+import { Avatar, Delta } from '../components/market-ui';
 import { MarketChart } from '../components/market-graphics';
-import { MarketStatus, TickerTape } from '../components/market-chrome';
 import { RulePlayground } from '../components/rule-playground';
+import { MorphNav } from '../components/morph-nav';
+import { GridFooter } from '../components/grid-footer';
 import { compactDollars, originalCoins, units } from '../lib/market-data.mjs';
 import { coinPath } from '../lib/routes.mjs';
 import stockList from '../lib/stock-list.json';
@@ -63,21 +64,10 @@ function StatIcon({ kind }) {
 export default function HomePage() {
   return (
     <div className="home">
-      <header className="site-header">
-        <div className="nav-inner">
-          <Brand />
-          <nav aria-label="Main navigation">
-            <Link href="/markets/">Markets</Link>
-            <a href="#how">How it works</a>
-            <a href="#rules">Rules</a>
-            <Link href="/launch/">Launch</Link>
-          </nav>
-          <div className="nav-end">
-            <MarketStatus />
-            <Link className="button button-primary" href="/launch/">Launch a coin</Link>
-          </div>
-        </div>
-      </header>
+      <MorphNav
+        links={[{ href: '/markets/', label: 'Markets' }, { href: '#how', label: 'How it works' }, { href: '#rules', label: 'Rules' }]}
+        cta={{ href: '/launch/', label: 'Launch a coin' }}
+      />
 
       <main id="main" tabIndex={-1}>
         <section className="hero hero-panel" aria-labelledby="hero-title">
@@ -99,7 +89,6 @@ export default function HomePage() {
             </figure>
           </div>
         </section>
-        <TickerTape />
 
         <section id="how" className="shell home-section" aria-labelledby="how-title">
           <div className="section-head">
@@ -219,18 +208,7 @@ export default function HomePage() {
         </section>
       </main>
 
-      <footer className="site-footer">
-        <div className="shell footer-inner">
-          <div>
-            <Brand />
-            <p>Coins wired to the stock market, on Base.</p>
-          </div>
-          <div className="footer-col"><h3>Product</h3><Link href="/markets/">Markets</Link><Link href="/launch/">Launch a coin</Link></div>
-          <div className="footer-col"><h3>Learn</h3><a href="#how">How it works</a><a href="#rules">Rules</a></div>
-          <div className="footer-col"><h3>US market</h3><span className="footer-net"><MarketStatus compact /></span></div>
-        </div>
-        <div className="shell footer-base"><span>Stooks</span><span>Tokenized stocks on Base · Uniswap v4</span></div>
-      </footer>
+      <GridFooter />
     </div>
   );
 }

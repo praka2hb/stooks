@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { percent } from '../lib/market-data.mjs';
 import stockList from '../lib/stock-list.json';
+import { safeImage } from '../lib/coin-image';
 
 const illustrations = new Set(['cat', 'rocket', 'goose', 'receipt']);
 
@@ -9,6 +10,8 @@ export function Brand() {
 }
 
 export function Avatar({ coin, large = false }) {
+  const image = safeImage(coin.image);
+  if (image) return <img className={`avatar avatar-image${large ? ' large-avatar' : ''}`} src={image} alt="" aria-hidden="true" />;
   const art = illustrations.has(coin.art) ? coin.art : 'initial';
   return <span className={`avatar avatar-${art}${large ? ' large-avatar' : ''}`} aria-hidden="true">{art === 'initial' && coin.symbol.slice(0, 2)}</span>;
 }
