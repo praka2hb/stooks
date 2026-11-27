@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><title>stooks merge v3</title>
+<style>
+ body{margin:0;background:#101318;color:#dfe6f0;font:13px/1.4 ui-monospace,Menlo,monospace;display:grid;place-content:center;min-height:100vh;gap:14px}
+ canvas{width:min(94vw,2172px);height:auto;display:block}
+ .bar{display:flex;gap:14px;align-items:center}.bar input{flex:1}button{font:inherit;padding:4px 12px}
+</style>
+<canvas id="c"></canvas>
+<div class="bar"><button id="p">pause</button><input id="s" type="range" min="0" max="533" step="1" value="0"><span id="l"></span></div>
+<script src="assets.js"></script><script src="merge.js"></script>
+<script type="module">
+const { CFG, init, renderFrame, checkGloss } = STOOKS, c = document.getElementById('c');
+c.width = CFG.W; c.height = CFG.H; const g = c.getContext('2d', { willReadFrequently: location.hash.startsWith('#render') });
+const s = document.getElementById('s'), l = document.getElementById('l'), p = document.getElementById('p'), N = Math.round(CFG.DUR * CFG.FPS); s.max = N - 1;
+try { await init(); } catch (e) { document.title = 'error'; l.textContent = e.message; if (location.protocol.startsWith('http')) fetch('/error', { method: 'POST', body: e.stack }); throw e; }
+if (location.hash.startsWith('#render')) {                // driven by render.mjs
+  const list = await (await fetch('/frames')).json();
+  try { for (const f of list) { if (f % 30 === 0) checkGloss(); renderFrame(g, f / CFG.FPS); await fetch('/frame/' + f, { method: 'POST', body: g.getImageData(0, 0, CFG.W, CFG.H).data }); } }
+  catch (e) { await fetch('/error', { method: 'POST', body: e.stack }); throw e; }
+  await fetch('/done', { method: 'POST' });
+} else {
+  let play = true, f = 0, t0 = performance.now();
+  const show = () => { renderFrame(g, f / CFG.FPS); s.value = f; l.textContent = (f / CFG.FPS).toFixed(3) + 's  f' + f; };
+  p.onclick = () => { play = !play; p.textContent = play ? 'pause' : 'play'; t0 = performance.now() - f / CFG.FPS * 1e3; };
+  s.oninput = () => { play = false; p.textContent = 'play'; f = +s.value; show(); };
+  onkeydown = e => { if (e.key === ' ') p.click(); const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key]; if (d) { play = false; f = (f + d + N) % N; show(); } };
+  (function loop(now) { if (play) { f = Math.floor((now - t0) / 1e3 * CFG.FPS + N) % N; show(); } requestAnimationFrame(loop); })(performance.now());
+}
+</script>

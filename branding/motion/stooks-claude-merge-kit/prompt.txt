@@ -1,0 +1,11 @@
+Create a 5.9-second looping motion graphic using the four attached assets. The visual idea is that “stocks” and “hooks” physically combine to spell “stooks.”
+
+Use blurred-blue.png as a fixed, full-bleed 2172 × 724 background. Animate the actual paths from stocks.svg and hooks.svg. Preserve the lowercase letter shapes, glossy pink faces, cherry-red backing, and white sticker outline. Match the final silhouette and spacing to stooks.svg.
+
+0.0–0.8s — Bring “stocks” in from the left and “hooks” from the right. Show both on the same baseline at equal letter height. Ease into place with a little overshoot.
+0.8–1.8s — Hold the two words side by side with a visible gap so both are easy to read.
+1.8–3.1s — Slide them together. Keep the “st” from the left word and the “ooks” from the right word visible throughout. Tuck the extra “ocks” from “stocks” behind the “t” and the “h” from “hooks” behind the first “o.” Close the gap until the surviving six letters spell “stooks.” Merge the red backings and white outer borders into one continuous sticker with a clean join.
+3.1–5.1s — Let the centered “stooks” settle with a small bounce. Sweep a narrow, soft highlight across the pink letter faces once, then hold.
+5.1–5.9s — Lift the finished sticker out and bring the original two words back from the edges. Match their positions and velocity across the loop boundary.
+
+Keep the camera locked. The blue background stays soft and the lettering stays crisp. The merge should be readable frame by frame. Export a silent H.264 MP4 at 2172 × 724 and 60 fps, a smaller looping WebP preview, and the editable animation source.
